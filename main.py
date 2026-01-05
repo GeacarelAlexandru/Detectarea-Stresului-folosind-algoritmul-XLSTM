@@ -4,28 +4,32 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from transformers import AutoTokenizer
-# Asigură-te că ai instalat: pip install xlstm
-from xlstm import xLSTMStack, xLSTMStackConfig
+
+# Importurile corecte pentru librăria xLSTM
+try:
+    from xlstm import (
+        xLSTMBlockStack,
+        xLSTMBlockStackConfig,
+        mLSTMBlockConfig,
+        mLSTMLayerConfig,
+        sLSTMBlockConfig,
+        sLSTMLayerConfig,
+        FeedForwardConfig
+    )
+except ImportError:
+    print("Eroare: Asigură-te că ai instalat xlstm corect (pip install xlstm)")
 
 # 1. Încărcare și Filtrare Date
+# Citim fișierul și filtrăm după încredere (confidence > 0.6)
 df = pd.read_csv('dreaddit-train.csv')
+df = df[df['confidence'] > 0.6].reset_index(drop=True)
+print(f"Dataset filtrat: {len(df)} rânduri rămase (unde confidence > 0.6).")
 
-# Filtrare: păstrăm doar datele cu încredere ridicată
-initial_count = len(df)
-df = df[df['confidence'] > 0.6]
-print(f"Am eliminat {initial_count - len(df)} rânduri cu încredere scăzută.")
-
-# Păstrăm coloanele necesare
-df = df[['text', 'label']].reset_index(drop=True)
-
-# 2. Configurare Model și Tokenizer
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
+# 2. Dataset și Preprocesare
 class StressDataset(Dataset):
     def __init__(self, texts, labels, tokenizer, max_len=128):
-        self.texts = texts.values
-        self.labels = labels.values
+        self.texts = texts
+        self.labels = labels
         self.tokenizer = tokenizer
         self.max_len = max_len
 
@@ -46,49 +50,65 @@ class StressDataset(Dataset):
             'label': torch.tensor(self.labels[item], dtype=torch.long)
         }
 
-# Pregătire Dataloaders
+# Setări model
+MAX_LEN = 128
+BATCH_SIZE = 16
+EMB_DIM = 128
+
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=0.15, random_state=42)
 
-train_loader = DataLoader(StressDataset(X_train, y_train, tokenizer), batch_size=16, shuffle=True)
-test_loader = DataLoader(StressDataset(X_test, y_test, tokenizer), batch_size=16)
+train_loader = DataLoader(StressDataset(X_train.values, y_train.values, tokenizer, MAX_LEN), batch_size=BATCH_SIZE, shuffle=True)
+test_loader = DataLoader(StressDataset(X_test.values, y_test.values, tokenizer, MAX_LEN), batch_size=BATCH_SIZE)
 
-# 3. Arhitectura xLSTM
-
-class StressXLSTM(nn.Module):
-    def __init__(self, vocab_size, emb_dim=128, hidden_dim=256):
+# 3. Definirea Arhitecturii xLSTM
+class StressXLSTMModel(nn.Module):
+    def __init__(self, vocab_size):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, emb_dim)
+        self.embedding = nn.Embedding(vocab_size, EMB_DIM)
         
-        # Configurație pentru sLSTM (versiune scalabilă a LSTM)
-        cfg = xLSTMStackConfig(
-            context_length=128,
-            embedding_dim=emb_dim,
-            num_layers=2,
-            slstm_config={'backend': 'vanilla', 'num_heads': 4}
+        # Configurare xLSTM (folosind sLSTM pentru performanță pe text)
+        cfg = xLSTMBlockStackConfig(
+            mlstm_block=None, # Putem folosi doar sLSTM pentru început
+            slstm_block=sLSTMBlockConfig(
+                slstm=sLSTMLayerConfig(
+                    backend="vanilla", # Folosim vanilla dacă nu ai setup de nuclee Triton/CUDA complexe
+                    num_heads=4,
+                    conv1d_kernel_size=4
+                ),
+                feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu")
+            ),
+            context_length=MAX_LEN,
+            num_blocks=2,
+            embedding_dim=EMB_DIM,
+            slstm_at=[0, 1] # Aplicăm sLSTM pe ambele layere
         )
-        self.xlstm = xLSTMStack(cfg)
+        
+        self.xlstm_stack = xLSTMBlockStack(cfg)
         self.classifier = nn.Sequential(
-            nn.Linear(emb_dim, 64),
+            nn.Linear(EMB_DIM, 64),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 2)
+            nn.Dropout(0.3),
+            nn.Linear(64, 2) # 0 = Fără stres, 1 = Stres
         )
 
     def forward(self, x):
         x = self.embedding(x)
-        x = self.xlstm(x)
-        # Pooling: luăm media reprezentărilor pentru tot textul
-        x = torch.mean(x, dim=1) 
+        x = self.xlstm_stack(x)
+        # Global Average Pooling (media pe toată secvența de text)
+        x = torch.mean(x, dim=1)
         return self.classifier(x)
 
-model = StressXLSTM(len(tokenizer.vocab)).to(device)
+# Inițializare model și optimizator
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = StressXLSTMModel(len(tokenizer.vocab)).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 criterion = nn.CrossEntropyLoss()
 
-# 4. Bucla de Antrenare cu validare
-def train_model(epochs=5):
-    for epoch in range(epochs):
-        model.train()
+# 4. Antrenare
+def train():
+    model.train()
+    for epoch in range(3): # 3 epoci sunt suficiente pentru un test inițial
         total_loss = 0
         for batch in train_loader:
             ids = batch['input_ids'].to(device)
@@ -100,18 +120,20 @@ def train_model(epochs=5):
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        
-        # Evaluare rapidă
-        model.eval()
-        correct = 0
-        with torch.no_grad():
-            for batch in test_loader:
-                ids = batch['input_ids'].to(device)
-                labels = batch['label'].to(device)
-                preds = model(ids).argmax(dim=1)
-                correct += (preds == labels).sum().item()
-        
-        accuracy = correct / len(X_test)
-        print(f"Epoch {epoch+1} | Loss: {total_loss/len(train_loader):.4f} | Acc: {accuracy:.2%}")
+            
+        print(f"Epoca {epoch+1} finalizată. Loss mediu: {total_loss/len(train_loader):.4f}")
 
-train_model()
+    # Validare finală
+    model.eval()
+    correct = 0
+    with torch.no_grad():
+        for batch in test_loader:
+            ids = batch['input_ids'].to(device)
+            labels = batch['label'].to(device)
+            preds = model(ids).argmax(dim=1)
+            correct += (preds == labels).sum().item()
+    
+    print(f"Acuratețe pe setul de test: {correct/len(X_test):.2%}")
+
+if __name__ == "__main__":
+    train()
