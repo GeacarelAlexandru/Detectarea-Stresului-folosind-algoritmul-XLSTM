@@ -29,24 +29,29 @@ df_train['text'] = df_train['text'].apply(clean_text)
 df_test['text'] = df_test['text'].apply(clean_text)
 
 # Class Dataset
+from torch.utils.data import Dataset
+import torch
+
 class StressDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length):
-        self.texts = texts.tolist()
-        self.labels = labels.tolist()
+    def __init__(self, texts, labels, tokenizer, max_len):
+        self.texts = list(texts)
+        self.labels = list(labels)
         self.tokenizer = tokenizer
-        self.max_length = max_length
+        self.max_len = max_len
 
     def __len__(self):
         return len(self.texts)
 
-    def __getitem__(self, idx):
-        text = self.texts[idx]
-        label = self.labels[idx]
+    def __getitem__(self, index):
+        text = str(self.texts[index])
+        label = self.labels[index]
+
+        cleaned_text = clean_text(text)
 
         encoding = self.tokenizer(
-            text,
+            cleaned_text,
             add_special_tokens=True,
-            max_length=self.max_length,
+            max_length=self.max_len,
             padding='max_length',
             truncation=True,
             return_tensors='pt'
@@ -57,14 +62,14 @@ class StressDataset(Dataset):
             'label': torch.tensor(label, dtype=torch.float)
         }
 
-# Final DataLoaders
+    
+    
 TOKENIZER_NAME = 'bert-base-uncased'
 MAX_LENGTH = 128
 BATCH_SIZE = 16
 
 tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
-# Create objects of the StressDataset class for training and testing
 train_dataset = StressDataset(df_train['text'], df_train['label'], tokenizer, MAX_LENGTH)
 test_dataset = StressDataset(df_test['text'], df_test['label'], tokenizer, MAX_LENGTH)
 
@@ -75,36 +80,49 @@ print(f"Set de antrenament: {len(train_dataset)} texte.")
 print(f"Set de testare: {len(test_dataset)} texte.")
 
 try:
-    from xlstm import xLSTMBlock
-    HAS_XLSTM = True
+    from xlstm.xlstm_large.model import xLSTMLargeConfig,xLSTMLarge
+    HAS_XLSTM = False
 except ImportError:
     print("Biblioteca xLSTM nu a fost gasita.")
     HAS_XLSTM = False
 
 class StressDetector(nn.Module):
     def __init__(self, vocab_size, embed_dim, hidden_dim, output_dim):
-       super(StressDetector,self).__init__()
+        super(StressDetector, self).__init__()
 
-       self.embedding = nn.Embedding(num_embeddings = vocab_size,embedding_dim = embed_dim)
-       if HAS_XLSTM:
-           self.sequence_model = xLSTMBlock(
-               embedding_dim = embed_dim,
-               hidden_dim = hidden_dim)
-       else:
-           self.sequence_model = nn.LSTM(
-               input_size = embed_dim,
-               hidden_size = hidden_dim,
-               batch_first = True
-           ) 
-       self.fc = nn.Linear(in_features = hidden_dim, out_features = 1)
-    def forward(self, input_ids):
-        x = self.embedding(input_ids)
+        self.embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embed_dim)
+        
         if HAS_XLSTM:
-            x = self.sequence_model(x)
-            last_hidden_state = x[:, -1, :]
+            config = xLSTMLargeConfig(
+                vocab_size=vocab_size,
+                embedding_dim=embed_dim,
+                num_heads=4,
+                num_blocks=2
+            )
+            self.sequence_model = xLSTMLarge(config)
+            
+            fc_input_size = embed_dim
+        else:
+            self.sequence_model = nn.LSTM(
+                input_size=embed_dim,
+                hidden_size=hidden_dim,
+                batch_first=True
+            )
+            fc_input_size = hidden_dim 
+            
+        self.fc = nn.Linear(fc_input_size, output_dim)
+
+    def forward(self, input_ids):
+        if HAS_XLSTM:
+            output = self.sequence_model(input_ids)
+            if isinstance(output, tuple):
+                output = output[0]
+            last_hidden_state = torch.mean(output, dim=1)
         else: 
-            output,(hidden,cell) = self.sequence_model(x)
-            last_hidden_state = torch.mean(output,dim = 1)
+            x = self.embedding(input_ids)
+            output, (hidden, cell) = self.sequence_model(x)
+            last_hidden_state = torch.mean(output, dim=1)
+            
         logits = self.fc(last_hidden_state)
         return logits.squeeze(-1)
 

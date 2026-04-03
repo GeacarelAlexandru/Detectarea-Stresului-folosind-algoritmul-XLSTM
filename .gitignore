@@ -11,5 +11,3 @@ env/
 __pycache__/
 *.pyc
 
-# Datasets (Optional, if your CSV is huge)
-# train.csv
