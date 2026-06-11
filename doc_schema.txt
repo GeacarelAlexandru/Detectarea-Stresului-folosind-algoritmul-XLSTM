@@ -1,0 +1,37 @@
+Scheletul Lucrării Tale de Licență
+
+1. Introducere
+
+    1.1. Generalități: Impactul social media (Reddit) asupra sănătății mintale. Cum oamenii își varsă emoțiile online și de ce este importantă detectarea automată a stresului.
+
+    1.2. Scopul lucrării: Implementarea celei mai noi arhitecturi recurente (xLSTM) pentru a crea un detector de stres.
+
+    1.3. Structura capitolelor: Pe scurt, ce conține fiecare capitol.
+
+2. Stadiul Actual (State of the Art)
+
+    Aici vei vorbi despre cum s-a făcut detectarea stresului până acum (modele clasice de Machine Learning, dicționare de sentimente, primele rețele neurale).
+
+3. Arhitectura xLSTM (Partea Teoretică Centrală)
+
+    Aici strălucești! Explici ce este xLSTM și de ce este revoluționar.
+
+    Vorbești despre inovațiile pe care le-ai implementat și tu în cod: Exponential Gating (Porțile exponențiale) și necesitatea stabilizării matematice.
+
+4. Implementarea Sistemului (Povestea Codului Tău)
+
+    4.1. Setul de date: Descrierea bazei de date "Dreaddit" (câte texte ai avut, cum ai curățat textul eliminând link-urile și caracterele speciale).
+
+    4.2. Arhitectura personalizată: Aici povestești exact lupta hardware. Explici de ce pachetul oficial nu a funcționat pe Windows/CPU din cauza Triton și cum ai creat o versiune Pure PyTorch pentru a ocoli limitarea.
+
+    4.3. Optimizarea hiperparametrilor: Cum ai folosit Optuna și algoritmi genetici pentru a găsi rețeta perfectă (lr, hidden_dim, batch_size).
+
+5. Rezultate Experimentale
+
+    Afișezi grafice/tabele cu acuratețea obținută (acel ~72%).
+
+    Pui capturi de ecran din terminal cu testarea live (cum am făcut mai devreme cu acele texte în engleză), arătând cum modelul detectează stresul în procente.
+
+6. Concluzii și dezvoltări ulterioare
+
+    Ce ai reușit să demonstrezi și cum s-ar putea îmbunătăți în viitor (ex: adăugând o interfață web).
