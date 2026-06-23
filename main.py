@@ -7,7 +7,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from transformers import AutoTokenizer
-from xlstm_pure import Pure_xLSTM
+from Pure_xLSTM import Pure_xLSTM
 
 # Clean the text data
 def clean_text(text):

@@ -7,7 +7,7 @@ from sklearn.metrics import confusion_matrix
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader, Dataset
 import re
-from xlstm_pure import Pure_xLSTM
+from Pure_xLSTM import Pure_xLSTM
 
 print("Se încarcă datele și modelul pentru generarea graficelor...")
 

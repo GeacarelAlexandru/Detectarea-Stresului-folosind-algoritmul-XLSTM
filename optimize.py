@@ -7,17 +7,21 @@ from torch.utils.data import DataLoader
 from main import *
 
 def objective(trial):
+    # 1. Definirea spațiului de căutare (Search Space)
     lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
     batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
-    
+
+    # 2. Reîncărcarea datelor în funcție de noul batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    
+   
+    # 3. Inițializarea modelului principal și a optimizatorului
     model = StressDetector(VOCAB_SIZE, EMBED_DIM, hidden_dim, OUTPUT_DIM).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     criterion = nn.BCEWithLogitsLoss()
     
+    # 4. Antrenarea rapidă a modelului (3 epoci per test)
     EPOCHS = 3
     for epoch in range(EPOCHS):
         model.train()
@@ -30,7 +34,8 @@ def objective(trial):
             loss = criterion(predictions, labels)
             loss.backward()
             optimizer.step()
-            
+
+    # 5. Evaluarea pe setul de testare        
     model.eval()
     correct = 0
     total = 0
@@ -38,7 +43,7 @@ def objective(trial):
         for batch in test_loader:
             input_ids = batch['input_ids'].to(device)
             labels = batch['label'].to(device)
-            
+            # Transformarea valorilor brute (logits) în decizii binare (0 sau 1)
             predictions = model(input_ids)
             pred_labels = (predictions > 0).float()
             correct += (pred_labels == labels).sum().item()

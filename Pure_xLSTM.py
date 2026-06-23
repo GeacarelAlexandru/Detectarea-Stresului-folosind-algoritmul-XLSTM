@@ -2,15 +2,10 @@ import torch
 import torch.nn as nn
 
 class ExponentialGatedRNNCell(nn.Module):
-    """
-    Celulă recurentă bazată pe gating exponențial.
-    (Versiune cu Stabilizare Matematică pentru prevenirea NaN)
-    """
     def __init__(self, input_size, hidden_size):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        
         self.weight_ih = nn.Linear(input_size, 4 * hidden_size)
         self.weight_hh = nn.Linear(hidden_size, 4 * hidden_size)
 
@@ -18,25 +13,16 @@ class ExponentialGatedRNNCell(nn.Module):
         gates = self.weight_ih(x) + self.weight_hh(h)
         i_tilde, f_tilde, o_gate, z_tilde = gates.chunk(4, 1)
         
-        # -----------------------------------------------------------------
-        # MAGIA xLSTM: Stabilizarea în Spațiul Logaritmic (m)
-        # -----------------------------------------------------------------
-        
-        # 1. Calculăm noul stabilizator (maximul dintre poarta F, poarta I și vechiul M)
         m_new = torch.maximum(f_tilde + m, i_tilde)
-        
-        # 2. Calculăm porțile exponențiale scăzând stabilizatorul.
-        # Matematic, puterile sunt mereu <= 0, deci rezultatul exp() e mereu <= 1.0! (Fără explozii NaN)
+       
         i_gate = torch.exp(i_tilde - m_new)
         f_gate = torch.exp(f_tilde + m - m_new)
         
         z = torch.tanh(z_tilde)
-        
-        # 3. Actualizăm memoriile (acum sunt perfect sigure și nu explodează)
+
         c_new = f_gate * c + i_gate * z
         n_new = f_gate * n + i_gate
         
-        # 4. Output-ul final al celulei
         h_new = torch.sigmoid(o_gate) * (c_new / (n_new + 1e-6))
         
         return h_new, c_new, n_new, m_new
